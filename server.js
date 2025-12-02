@@ -13,9 +13,12 @@ const server = http.createServer((req, res) => {
 const wss = new WebSocket.Server({ noServer: true });
 
 let rooms = {};
-let updateCounts = {};   // { roomCode: počet update_position zpráv }
+let updateCounts = {};
+let joinTimeouts = {}; // { roomCode: timeoutID }
+
 let lastLogTime = Date.now();
 const LOG_INTERVAL = 10000; // 10 sekund
+const JOIN_TIMEOUT = 10 * 60 * 1000; // 10 minut v ms
 
 console.log(`🚀 Server běží na portu ${PORT}`);
 
@@ -50,6 +53,24 @@ wss.on("connection", (ws) => {
 			rooms[data.code] = [ws];
 			ws.send(JSON.stringify({ action: "waiting", code: data.code }));
 			console.log("🆕 Vytvořen pokoj:", data.code);
+
+			// --- Start join timeout ---
+			joinTimeouts[data.code] = setTimeout(() => {
+				if (rooms[data.code] && rooms[data.code].length === 1) {
+					// hostitel stále čeká, poslat zprávu a odpojit
+					const hostWs = rooms[data.code][0];
+					if (hostWs.readyState === WebSocket.OPEN) {
+						hostWs.send(JSON.stringify({ 
+							action: "timeout_disconnect", 
+							message: "Joiner se nepřipojil do 10 minut" 
+						}));
+						hostWs.close();
+					}
+					delete rooms[data.code];
+					delete joinTimeouts[data.code];
+					console.log(`⏰ Pokoj ${data.code} vypršel, hostitel odpojen`);
+				}
+			}, JOIN_TIMEOUT);
 		}
 
 		// --- JOIN ---
@@ -58,10 +79,15 @@ wss.on("connection", (ws) => {
 				ws.send(JSON.stringify({ action: "error", message: "Room not found" }));
 				return;
 			}
-			// kontrola max 2 hráči
 			if (rooms[data.code].length >= 2) {
 				ws.send(JSON.stringify({ action: "error", message: "Room full" }));
 				return;
+			}
+
+			// joiner připojen -> zrušit timeout
+			if (joinTimeouts[data.code]) {
+				clearTimeout(joinTimeouts[data.code]);
+				delete joinTimeouts[data.code];
 			}
 
 			rooms[data.code].push(ws);
@@ -81,7 +107,6 @@ wss.on("connection", (ws) => {
 				}
 			}
 			if (roomCode) {
-				// poslat pozici jen druhému hráči (hostovi)
 				rooms[roomCode].forEach(c => {
 					if (c !== ws) {
 						c.send(JSON.stringify({
@@ -90,8 +115,6 @@ wss.on("connection", (ws) => {
 						}));
 					}
 				});
-
-				// počítadlo pro souhrnný log
 				if (!updateCounts[roomCode]) updateCounts[roomCode] = 0;
 				updateCounts[roomCode]++;
 			}
@@ -117,7 +140,13 @@ wss.on("connection", (ws) => {
 		console.log("❌ Klient odpojen");
 		for (let code in rooms) {
 			rooms[code] = rooms[code].filter(c => c !== ws);
-			if (rooms[code].length === 0) delete rooms[code];
+			if (rooms[code].length === 0) {
+				delete rooms[code];
+				if (joinTimeouts[code]) {
+					clearTimeout(joinTimeouts[code]);
+					delete joinTimeouts[code];
+				}
+			}
 		}
 	});
 });
