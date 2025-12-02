@@ -41,11 +41,7 @@ wss.on("connection", (ws) => {
             return;
         }
 
-        // --- LOG RAW/PARSED pro debug (jen když chcete) ---
-        // console.log("📩 RAW:", msg.toString());
-        // console.log("📨 PARSED:", data);
-
-        // CREATE
+        // --- CREATE ---
         if (data.action === "create") {
             if (rooms[data.code]) {
                 ws.send(JSON.stringify({ action: "error", message: "Room code exists" }));
@@ -56,12 +52,18 @@ wss.on("connection", (ws) => {
             console.log("🆕 Vytvořen pokoj:", data.code);
         }
 
-        // JOIN
+        // --- JOIN ---
         else if (data.action === "join") {
             if (!rooms[data.code]) {
                 ws.send(JSON.stringify({ action: "error", message: "Room not found" }));
                 return;
             }
+            // kontrola max 2 hráči
+            if (rooms[data.code].length >= 2) {
+                ws.send(JSON.stringify({ action: "error", message: "Room full" }));
+                return;
+            }
+
             rooms[data.code].push(ws);
             rooms[data.code].forEach(c => {
                 c.send(JSON.stringify({ action: "connected", code: data.code }));
@@ -69,9 +71,8 @@ wss.on("connection", (ws) => {
             console.log("🔗 Připojen hráč do:", data.code);
         }
 
-        // UPDATE_POSITION
+        // --- UPDATE_POSITION ---
         else if (data.action === "update_position") {
-            // zjistit, ve kterém pokoji je klient
             let roomCode = null;
             for (let code in rooms) {
                 if (rooms[code].includes(ws)) {
@@ -80,7 +81,6 @@ wss.on("connection", (ws) => {
                 }
             }
             if (roomCode) {
-                // poslat všem ostatním klientům v pokoji
                 rooms[roomCode].forEach(c => {
                     if (c !== ws) {
                         c.send(JSON.stringify({
@@ -90,13 +90,12 @@ wss.on("connection", (ws) => {
                     }
                 });
 
-                // zvýšit počítadlo
                 if (!updateCounts[roomCode]) updateCounts[roomCode] = 0;
                 updateCounts[roomCode]++;
             }
         }
 
-        // ERROR pro neznámé akce
+        // --- ERROR pro neznámé akce ---
         else {
             ws.send(JSON.stringify({ action: "error", message: "Unknown action" }));
         }
@@ -106,7 +105,7 @@ wss.on("connection", (ws) => {
         if (now - lastLogTime >= LOG_INTERVAL) {
             for (let code in updateCounts) {
                 console.log(`📊 Pokoj ${code}: Joiner poslal ${updateCounts[code]} update_position zpráv`);
-                updateCounts[code] = 0; // reset počítadla
+                updateCounts[code] = 0;
             }
             lastLogTime = now;
         }
