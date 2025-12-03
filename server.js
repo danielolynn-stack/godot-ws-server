@@ -1,7 +1,7 @@
 const http = require("http");
 const WebSocket = require("ws");
 
-const PORT = process.env.PORT || 10000;
+const PORT = process.env.PORT || 443;
 
 // Vytvoříme HTTP server (Render to vyžaduje)
 const server = http.createServer((req, res) => {
@@ -234,3 +234,4 @@ wss.on("connection", (ws) => {
 
 server.listen(PORT);
 console.log(`🚀 HTTP/WebSocket server běží na portu ${PORT}`);
+
